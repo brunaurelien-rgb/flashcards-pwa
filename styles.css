@@ -1,0 +1,55 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f3f6fa;
+  color: #162033;
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body { background: #f3f6fa; -webkit-font-smoothing: antialiased; overscroll-behavior-y: contain; }
+button { font: inherit; }
+.app-shell { width: min(100%, 560px); min-height: 100dvh; margin: 0 auto; padding: calc(18px + env(safe-area-inset-top)) 18px calc(28px + env(safe-area-inset-bottom)); }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.header-title { min-width: 0; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 32px; line-height: 1.05; font-weight: 900; letter-spacing: 0; }
+.subtitle { margin-top: 4px; color: #65758b; font-size: 15px; }
+.total-pill, .level-pill { flex: 0 0 auto; border-radius: 8px; background: #e7eef8; color: #31435c; font-size: 13px; font-weight: 800; padding: 8px 10px; white-space: nowrap; }
+.stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+.stat-box { min-height: 72px; display: grid; place-items: center; gap: 4px; padding: 10px 8px; border: 1px solid #d9e1ec; border-radius: 8px; background: #ffffff; }
+.stat-value { color: #162033; font-size: 22px; line-height: 1; font-weight: 850; }
+.stat-label { color: #65758b; font-size: 12px; text-align: center; }
+.remaining { margin-bottom: 10px; color: #65758b; font-size: 13px; font-weight: 700; text-align: center; }
+.card-wrap { position: relative; touch-action: pan-y; }
+.flashcard { position: relative; min-height: 520px; display: flex; flex-direction: column; gap: 18px; overflow: hidden; padding: 20px; border: 1px solid #d9e1ec; border-radius: 8px; background: #ffffff; box-shadow: 0 8px 18px rgba(22, 32, 51, 0.08); transition: transform 160ms ease, opacity 160ms ease; will-change: transform; }
+.flashcard.dragging { transition: none; }
+.card-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.next-date { min-width: 0; color: #738196; font-size: 12px; text-align: right; }
+.question-block { min-height: 142px; display: grid; place-items: center; padding: 0 4px; }
+.question { color: #142035; font-size: 25px; line-height: 1.28; font-weight: 850; text-align: center; }
+.action-stack { display: grid; gap: 10px; }
+.answer-box { display: grid; gap: 8px; padding: 14px; border: 1px solid #dce4ef; border-radius: 8px; background: #f7fafd; }
+.answer-title { color: #65758b; font-size: 13px; font-weight: 850; text-transform: uppercase; }
+.answer-text { color: #263449; font-size: 16px; line-height: 1.45; }
+.review-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: auto; }
+.btn { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 12px 16px; font-size: 16px; font-weight: 800; text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.btn:active { transform: scale(0.98); opacity: 0.84; }
+.btn-secondary { border: 1px solid #d7dee8; background: #eef2f7; color: #1b2737; }
+.btn-primary { background: #2457c5; color: #ffffff; }
+.btn-success { background: #228b64; color: #ffffff; }
+.btn-danger { background: #d64545; color: #ffffff; }
+.swipe-badge { position: absolute; top: 72px; z-index: 2; padding: 8px 12px; border: 3px solid; border-radius: 8px; background: #ffffff; font-size: 18px; font-weight: 900; opacity: 0; pointer-events: none; }
+.swipe-known { left: 18px; color: #228b64; border-color: #228b64; transform: rotate(-6deg); }
+.swipe-unknown { right: 18px; color: #d64545; border-color: #d64545; transform: rotate(6deg); }
+.done-panel, .install-panel { display: grid; gap: 16px; margin-top: 12px; padding: 22px; border: 1px solid #d9e1ec; border-radius: 8px; background: #ffffff; }
+.done-title { font-size: 26px; line-height: 1.12; font-weight: 900; text-align: center; }
+.done-text, .install-text { color: #586a82; font-size: 16px; line-height: 1.45; text-align: center; }
+.install-panel { margin-top: 18px; }
+.install-title { font-size: 17px; font-weight: 850; text-align: center; }
+@media (max-width: 380px) {
+  .app-shell { padding-left: 14px; padding-right: 14px; }
+  h1 { font-size: 29px; }
+  .question { font-size: 22px; }
+  .review-buttons { gap: 10px; }
+  .btn { padding-left: 10px; padding-right: 10px; font-size: 15px; }
+}
