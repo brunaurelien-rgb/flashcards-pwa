@@ -1,8 +1,11 @@
 'use strict';
 
 var STORAGE_KEY = 'flashcards.pwa.progress.v1';
-var MAX_LEVEL = 5;
-var MAX_INTERVAL_DAYS = 243;
+var BACKUP_KEY = STORAGE_KEY + '.backup';
+var STORAGE_PREFIX = 'flashcards.pwa.progress';
+var REVIEW_INTERVAL_DAYS = [1, 3, 6, 10, 15, 21, 28, 36, 45, 60];
+var MAX_LEVEL = REVIEW_INTERVAL_DAYS.length;
+var MAX_INTERVAL_DAYS = 60;
 var SWIPE_THRESHOLD = 96;
 var baseCards = (window.FLASHCARD_ROWS || []).map(createFlashcardFromRow);
 var cards = loadCards();
@@ -54,37 +57,164 @@ function clampLevel(value) {
   if (!Number.isInteger(level)) return 0;
   return Math.max(0, Math.min(MAX_LEVEL, level));
 }
-function loadCards() {
-  var rawCards = localStorage.getItem(STORAGE_KEY);
-  if (!rawCards) return baseCards;
+function normalizeCardText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+function cardKey(card) {
+  return normalizeCardText(card.question) + '|' + normalizeCardText(card.answer);
+}
+function createUniqueSavedMap(savedCards, getKey) {
+  var counts = new Map();
+  var map = new Map();
+  savedCards.forEach(function (card) {
+    var key = getKey(card);
+    if (!key || key === '|') return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    map.set(key, card);
+  });
+  Array.from(counts.keys()).forEach(function (key) {
+    if (counts.get(key) > 1) map.delete(key);
+  });
+  return map;
+}
+function parseSavedCards(rawCards) {
   try {
     var savedCards = JSON.parse(rawCards);
-    if (!Array.isArray(savedCards)) return baseCards;
-    var savedById = new Map(savedCards.map(function (card) { return [card.id, card]; }));
-    return baseCards.map(function (baseCard) {
-      var savedCard = savedById.get(baseCard.id);
-      if (!savedCard) return baseCard;
-      return Object.assign({}, baseCard, {
-        level: clampLevel(savedCard.level),
-        lastReview: savedCard.lastReview || null,
-        nextReview: savedCard.nextReview || baseCard.nextReview,
-        successCount: Number.isInteger(savedCard.successCount) ? savedCard.successCount : 0,
-        errorCount: Number.isInteger(savedCard.errorCount) ? savedCard.errorCount : 0
-      });
-    });
+    return Array.isArray(savedCards) ? savedCards : null;
   } catch (error) {
-    return baseCards;
+    return null;
   }
 }
-function saveCards() { localStorage.setItem(STORAGE_KEY, JSON.stringify(cards)); }
+function reviewTotal(savedCards) {
+  return savedCards.reduce(function (total, card) {
+    return total + (Number.isInteger(card.successCount) ? card.successCount : 0) + (Number.isInteger(card.errorCount) ? card.errorCount : 0);
+  }, 0);
+}
+function getSavedCardCandidates() {
+  var candidates = [];
+  for (var index = 0; index < localStorage.length; index += 1) {
+    var key = localStorage.key(index);
+    if (!key || key.indexOf(STORAGE_PREFIX) !== 0) continue;
+    var rawCards = localStorage.getItem(key);
+    var savedCards = parseSavedCards(rawCards);
+    if (!savedCards) continue;
+    candidates.push({ key: key, raw: rawCards, cards: savedCards, reviews: reviewTotal(savedCards) });
+  }
+  candidates.sort(function (a, b) {
+    if (b.reviews !== a.reviews) return b.reviews - a.reviews;
+    if (a.key === STORAGE_KEY) return -1;
+    if (b.key === STORAGE_KEY) return 1;
+    return a.key.localeCompare(b.key);
+  });
+  return candidates;
+}
+function mergeSavedProgress(baseCard, savedCard) {
+  var savedLevel = clampLevel(savedCard.level);
+  return Object.assign({}, baseCard, {
+    level: savedLevel,
+    lastReview: savedCard.lastReview || null,
+    nextReview: getNormalizedNextReview(savedCard, savedLevel, baseCard.nextReview),
+    successCount: Number.isInteger(savedCard.successCount) ? savedCard.successCount : 0,
+    errorCount: Number.isInteger(savedCard.errorCount) ? savedCard.errorCount : 0
+  });
+}
+function getNormalizedNextReview(savedCard, level, fallbackNextReview) {
+  if (!savedCard.nextReview) return fallbackNextReview;
+  if (!savedCard.lastReview) return savedCard.nextReview;
+
+  var scheduledNextReview = addDaysToISODate(savedCard.lastReview, getReviewIntervalDays(level));
+  return savedCard.nextReview > scheduledNextReview ? scheduledNextReview : savedCard.nextReview;
+}
+function loadCards() {
+  var candidates = getSavedCardCandidates();
+  if (!candidates.length) return baseCards;
+
+  var selected = candidates[0];
+  var savedCards = selected.cards;
+  var savedById = new Map(savedCards.map(function (card) { return [String(card.id), card]; }));
+  var savedByCardKey = createUniqueSavedMap(savedCards, cardKey);
+  var savedByAnswer = createUniqueSavedMap(savedCards, function (card) { return normalizeCardText(card.answer); });
+  var usedSavedCards = new Set();
+  var recoveredCount = 0;
+
+  var mergedCards = baseCards.map(function (baseCard) {
+    var savedCard = savedById.get(String(baseCard.id));
+    if (!savedCard) savedCard = savedByCardKey.get(cardKey(baseCard));
+    if (!savedCard) savedCard = savedByAnswer.get(normalizeCardText(baseCard.answer));
+    if (!savedCard || usedSavedCards.has(savedCard)) return baseCard;
+    usedSavedCards.add(savedCard);
+    if (String(savedCard.id) !== String(baseCard.id)) recoveredCount += 1;
+    return mergeSavedProgress(baseCard, savedCard);
+  });
+
+  if (selected.key !== STORAGE_KEY || recoveredCount > 0) {
+    localStorage.setItem(BACKUP_KEY + '.' + Date.now(), selected.raw);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedCards));
+  }
+
+  return mergedCards;
+}
+function saveCards() {
+  var currentRaw = localStorage.getItem(STORAGE_KEY);
+  if (currentRaw && !localStorage.getItem(BACKUP_KEY)) localStorage.setItem(BACKUP_KEY, currentRaw);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cards));
+}
+function exportProgressBackup() {
+  var payload = {
+    exportedAt: new Date().toISOString(),
+    app: 'flashcards-pwa',
+    cards: cards
+  };
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var link = document.createElement('a');
+  link.href = url;
+  link.download = 'flashcards-progression.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+function importProgressBackup(file) {
+  var reader = new FileReader();
+  reader.onload = function () {
+    try {
+      var payload = JSON.parse(String(reader.result || ''));
+      var importedCards = Array.isArray(payload) ? payload : payload.cards;
+      if (!Array.isArray(importedCards)) throw new Error('Format invalide');
+      localStorage.setItem(BACKUP_KEY + '.beforeImport.' + Date.now(), localStorage.getItem(STORAGE_KEY) || '[]');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(importedCards));
+      cards = loadCards();
+      render();
+    } catch (error) {
+      alert('Impossible d importer cette sauvegarde.');
+    }
+  };
+  reader.readAsText(file);
+}
 function isDue(card, referenceDate) { return card.nextReview <= (referenceDate || todayISO()); }
+function getReviewSortDate(card) { return card.lastReview || '0000-00-00'; }
+function compareDueCardsByOldestReview(a, b) {
+  var reviewDateCompare = getReviewSortDate(a).localeCompare(getReviewSortDate(b));
+  if (reviewDateCompare !== 0) return reviewDateCompare;
+
+  var nextReviewCompare = a.nextReview.localeCompare(b.nextReview);
+  if (nextReviewCompare !== 0) return nextReviewCompare;
+
+  return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+}
 function getDueCards() {
   var referenceDate = todayISO();
-  return cards.filter(function (card) { return isDue(card, referenceDate); });
+  return cards.filter(function (card) { return isDue(card, referenceDate); }).sort(compareDueCardsByOldestReview);
 }
 function getReviewIntervalDays(level) {
   if (level === 0) return 1;
-  return Math.min(Math.pow(3, level), MAX_INTERVAL_DAYS);
+  return REVIEW_INTERVAL_DAYS[level - 1] || MAX_INTERVAL_DAYS;
 }
 function applyReviewResult(card, result) {
   var reviewDate = todayISO();
@@ -150,6 +280,9 @@ function renderCard(card, dueCount) {
 function renderDone() {
   return '<section class="done-panel"><h2 class="done-title">Révision terminée</h2><p class="done-text">Toutes les cartes prévues pour aujourd\'hui sont faites.</p><button class="btn btn-secondary" type="button" data-action="reset">Réinitialiser la progression</button></section>';
 }
+function renderBackupPanel() {
+  return '<section class="install-panel"><div class="install-title">Sauvegarde</div><p class="install-text">Exporte ta progression avant chaque mise à jour importante.</p><button class="btn btn-secondary" type="button" data-action="export-progress">Exporter la progression</button><button class="btn btn-secondary" type="button" data-action="import-progress">Importer une progression</button><input class="hidden-file-input" type="file" accept="application/json,.json" data-progress-file /></section>';
+}
 function renderInstallPanel() {
   var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   if (isStandalone) return '';
@@ -162,7 +295,7 @@ function render() {
   var currentCard = dueCards[0];
   app.innerHTML = '<section class="header"><div class="header-title"><h1>Flashcards</h1><p class="subtitle">' + stats.dueCount + ' cartes à réviser aujourd\'hui</p></div><div class="total-pill">' + stats.totalCards + ' cartes</div></section>' +
     '<section class="stats-grid" aria-label="Statistiques">' + statBox(stats.dueCount, 'À revoir') + statBox(stats.knownAnswers, 'Connues') + statBox(stats.successRate + '%', 'Réussite') + '</section>' +
-    (currentCard ? renderCard(currentCard, stats.dueCount) : renderDone()) + renderInstallPanel();
+    (currentCard ? renderCard(currentCard, stats.dueCount) : renderDone()) + renderBackupPanel() + renderInstallPanel();
   bindActions(currentCard);
 }
 function bindActions(currentCard) {
@@ -174,13 +307,26 @@ function bindActions(currentCard) {
       if (currentCard && action === 'known') reviewCard(currentCard.id, 'known');
       if (currentCard && action === 'unknown') reviewCard(currentCard.id, 'unknown');
       if (action === 'reset') resetProgress();
+      if (action === 'export-progress') exportProgressBackup();
+      if (action === 'import-progress') {
+        var input = app.querySelector('[data-progress-file]');
+        if (input) input.click();
+      }
       if (action === 'install') promptInstall();
     });
   });
+  var progressInput = app.querySelector('[data-progress-file]');
+  if (progressInput) {
+    progressInput.addEventListener('change', function () {
+      if (progressInput.files && progressInput.files[0]) importProgressBackup(progressInput.files[0]);
+    });
+  }
   var cardEl = app.querySelector('.flashcard');
   if (cardEl && currentCard) bindSwipe(cardEl, currentCard.id);
 }
 function resetProgress() {
+  var currentRaw = localStorage.getItem(STORAGE_KEY);
+  if (currentRaw) localStorage.setItem(BACKUP_KEY + '.beforeReset.' + Date.now(), currentRaw);
   localStorage.removeItem(STORAGE_KEY);
   cards = baseCards;
   showShortAnswer = false;
